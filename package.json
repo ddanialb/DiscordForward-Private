@@ -8,12 +8,18 @@
     "dev": "node main.js",
     "test": "echo \"No tests specified\" && exit 0"
   },
-  "keywords": ["discord", "selfbot", "message-forwarder", "automation"],
+  "keywords": [
+    "discord",
+    "selfbot",
+    "message-forwarder",
+    "automation"
+  ],
   "author": "",
   "license": "MIT",
   "dependencies": {
     "discord.js-selfbot-v13": "^3.7.0",
-    "dotenv": "^17.2.2"
+    "dotenv": "^17.2.2",
+    "express": "^5.1.0"
   },
   "engines": {
     "node": ">=16.0.0"
