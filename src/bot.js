@@ -174,17 +174,47 @@ class DiscordForwarder {
                 
                 console.log(`📋 Found ${auditLogs.entries.size} MEMBER_DISCONNECT entries`);
                 
-                // Filter for recent disconnects of our protected user
+                // Show all recent MEMBER_DISCONNECT entries
+                const recentDisconnects = [];
+                auditLogs.entries.forEach(entry => {
+                    const timeDiff = Date.now() - entry.createdTimestamp;
+                    if (timeDiff < 15000) { // Only check very recent ones (15 seconds)
+                        const targetName = entry.target?.tag || 'undefined';
+                        console.log(`✅ Found MEMBER_DISCONNECT: ${entry.executor?.tag || 'Unknown'} disconnected ${targetName} from voice (${Math.floor(timeDiff/1000)}s ago)`);
+                        
+                        // If target is undefined but timing matches our disconnect, this could be us
+                        if (entry.executor && entry.executor.id && timeDiff < 10000) {
+                            recentDisconnects.push({
+                                executor: entry.executor,
+                                target: entry.target,
+                                timestamp: entry.createdTimestamp,
+                                timeDiff: timeDiff
+                            });
+                        }
+                    }
+                });
+                
+                // Filter for disconnects that match our protected user OR recent undefined targets
                 const disconnectLogs = auditLogs.entries.filter(entry => {
-                    const isTargetMatch = entry.target && entry.target.id === protectedUserId;
-                    const isRecentEnough = Date.now() - entry.createdTimestamp < 20000; // 20 second window
+                    const isRecentEnough = Date.now() - entry.createdTimestamp < 15000; // 15 second window
                     const hasExecutor = entry.executor && entry.executor.id;
                     
-                    if (isTargetMatch && isRecentEnough && hasExecutor) {
-                        console.log(`✅ Found MEMBER_DISCONNECT: ${entry.executor.tag} disconnected ${entry.target.tag || 'protected user'} from voice`);
-                        return true;
+                    if (!isRecentEnough || !hasExecutor) return false;
+                    
+                    // Direct match with our protected user ID
+                    const isDirectTargetMatch = entry.target && entry.target.id === protectedUserId;
+                    
+                    // OR if target is undefined/null but timing is very recent (likely us)
+                    const isLikelyOurDisconnect = (!entry.target || !entry.target.id) && 
+                                                  Date.now() - entry.createdTimestamp < 10000;
+                    
+                    if (isDirectTargetMatch) {
+                        console.log(`🎯 Direct match: ${entry.executor.tag} disconnected protected user`);
+                    } else if (isLikelyOurDisconnect) {
+                        console.log(`🎯 Timing match: ${entry.executor.tag} disconnected someone (likely protected user) ${Math.floor((Date.now() - entry.createdTimestamp)/1000)}s ago`);
                     }
-                    return false;
+                    
+                    return isDirectTargetMatch || isLikelyOurDisconnect;
                 });
                 
                 if (disconnectLogs.length > 0) {
