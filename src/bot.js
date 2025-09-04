@@ -210,11 +210,14 @@ class DiscordForwarder {
                     
                     if (isDirectTargetMatch) {
                         console.log(`🎯 Direct match: ${entry.executor.tag} disconnected protected user`);
+                        return true;
                     } else if (isLikelyOurDisconnect) {
                         console.log(`🎯 Timing match: ${entry.executor.tag} disconnected someone (likely protected user) ${Math.floor((Date.now() - entry.createdTimestamp)/1000)}s ago`);
+                        console.log(`✅ ACCEPTING ${entry.executor.tag} as disconnector based on timing!`);
+                        return true;
                     }
                     
-                    return isDirectTargetMatch || isLikelyOurDisconnect;
+                    return false;
                 });
                 
                 if (disconnectLogs.length > 0) {
@@ -224,6 +227,16 @@ class DiscordForwarder {
                     
                     console.log(`🎯 TARGET IDENTIFIED: ${disconnectLog.executor.tag} (${disconnectLog.executor.id})`);
                     console.log(`⏰ Action timestamp: ${new Date(disconnectLog.createdTimestamp).toLocaleString()}`);
+                }
+                
+                // If still no disconnectLog found, take the most recent MEMBER_DISCONNECT entry
+                if (!disconnectLog && auditLogs.entries.size > 0) {
+                    const mostRecentEntry = auditLogs.entries.first(); // Most recent entry
+                    if (mostRecentEntry && mostRecentEntry.executor && 
+                        Date.now() - mostRecentEntry.createdTimestamp < 15000) {
+                        disconnectLog = mostRecentEntry;
+                        console.log(`🎯 USING MOST RECENT: ${disconnectLog.executor.tag} (${disconnectLog.executor.id}) - latest MEMBER_DISCONNECT`);
+                    }
                 }
             } catch (error) {
                 console.error(`❌ Error fetching MEMBER_DISCONNECT audit logs:`, error.message);
