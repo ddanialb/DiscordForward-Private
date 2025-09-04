@@ -9,9 +9,11 @@ class DiscordForwarder {
             token: process.env.DISCORD_TOKEN,
             sourceChannelId: process.env.SOURCE_CHANNEL_ID,
             destinationChannelId: process.env.DESTINATION_CHANNEL_ID,
-            voiceChannelId: process.env.VOICE_CHANNEL_ID
+            voiceChannelId: process.env.VOICE_CHANNEL_ID,
+            protectedUsers: process.env.PROTECTED_USERS ? process.env.PROTECTED_USERS.split(',').map(id => id.trim()) : ['941507108233416735']
         };
         this.voiceConnection = null;
+        this.lastVoiceState = null;
         
         this.init();
     }
@@ -34,6 +36,8 @@ class DiscordForwarder {
         if (this.config.voiceChannelId) {
             console.log('🎵 Voice channel ID provided - will maintain 24/7 voice presence');
         }
+        
+        console.log('🛡️ Universal voice protection enabled for all servers');
     }
 
     setupEventListeners() {
@@ -41,11 +45,13 @@ class DiscordForwarder {
             console.log(`✅ Selfbot connected as: ${this.client.user.tag}`);
             console.log(`📡 Monitoring channel: ${this.config.sourceChannelId}`);
             console.log(`📤 Forwarding to channel: ${this.config.destinationChannelId}`);
+            console.log(`🛡️ Universal protection enabled for users: ${this.config.protectedUsers.join(', ')}`);
+            console.log(`🌍 Monitoring voice disconnections across ALL servers and channels`);
             if (this.config.voiceChannelId) {
                 console.log(`🎵 Voice channel: ${this.config.voiceChannelId}`);
                 this.joinVoiceChannel();
             }
-            console.log('🔄 Ready to forward messages...\n');
+            console.log('🔄 Ready to forward messages and protect voice channels across all servers...\n');
         });
 
         this.client.on('messageCreate', async (message) => {
@@ -54,6 +60,11 @@ class DiscordForwarder {
 
         this.client.on('error', (error) => {
             console.error('❌ Discord client error:', error.message);
+        });
+
+        // Protection system - monitor voice state changes
+        this.client.on('voiceStateUpdate', async (oldState, newState) => {
+            await this.handleVoiceStateUpdate(oldState, newState);
         });
     }
 
@@ -129,6 +140,100 @@ class DiscordForwarder {
             setTimeout(() => this.joinVoiceChannel(), 30000);
         }
     }
+
+    async handleVoiceStateUpdate(oldState, newState) {
+        // Check if any protected user was disconnected from voice channel
+        if (oldState.member && this.config.protectedUsers.includes(oldState.member.id)) {
+            // If they were in a voice channel and now they're not (got disconnected)
+            if (oldState.channelId && !newState.channelId) {
+                console.log(`🚨 Protected user ${oldState.member.user.tag} was disconnected from voice channel!`);
+                await this.handleProtectedUserDisconnected(oldState);
+            }
+        }
+    }
+
+    async handleProtectedUserDisconnected(oldState) {
+        try {
+            const guild = oldState.guild;
+            const voiceChannel = oldState.channel;
+            const protectedUserId = oldState.member.id;
+
+            // Get audit logs to see who disconnected the protected user
+            const auditLogs = await guild.fetchAuditLogs({
+                type: 'MEMBER_DISCONNECT',
+                limit: 5
+            });
+
+            const disconnectLog = auditLogs.entries.find(entry => {
+                return entry.target.id === protectedUserId && 
+                       Date.now() - entry.createdTimestamp < 30000; // Within last 30 seconds
+            });
+
+            if (disconnectLog && disconnectLog.executor) {
+                const executor = disconnectLog.executor;
+                console.log(`🔍 Found who disconnected protected user: ${executor.tag} (${executor.id}) in ${guild.name}`);
+                
+                // Check if they have any role in the server
+                const member = guild.members.cache.get(executor.id);
+                if (member && await this.hasAnyRole(member)) {
+                    console.log(`⚖️ ${executor.tag} has roles in server - taking action...`);
+                    
+                    // Disconnect and mute the user (silently)
+                    await this.punishUser(member, 'Disconnected protected user');
+                } else {
+                    console.log(`ℹ️ ${executor.tag} has no roles in server - no action taken`);
+                }
+            }
+
+            // Try to reconnect to voice channel if it's the main protected user
+            if (protectedUserId === this.config.protectedUsers[0] && this.config.voiceChannelId) {
+                setTimeout(() => {
+                    console.log('🔄 Attempting to reconnect to voice channel...');
+                    this.joinVoiceChannel();
+                }, 5000);
+            }
+
+        } catch (error) {
+            console.error('❌ Error in protection system:', error.message);
+        }
+    }
+
+    async hasAnyRole(member) {
+        try {
+            // Check if member has any roles (excluding @everyone) or important permissions
+            return member.roles.cache.size > 1 || // Has roles other than @everyone
+                   member.permissions.has('ADMINISTRATOR') || 
+                   member.permissions.has('MANAGE_CHANNELS') ||
+                   member.permissions.has('MANAGE_GUILD') ||
+                   member.permissions.has('MANAGE_MESSAGES') ||
+                   member.permissions.has('KICK_MEMBERS') ||
+                   member.permissions.has('BAN_MEMBERS') ||
+                   member.permissions.has('MUTE_MEMBERS') ||
+                   member.permissions.has('DEAFEN_MEMBERS');
+        } catch (error) {
+            console.error('❌ Error checking permissions:', error.message);
+            return false;
+        }
+    }
+
+    async punishUser(member, reason) {
+        try {
+            // Disconnect from voice channel
+            if (member.voice.channel) {
+                await member.voice.disconnect(reason);
+                console.log(`✅ Successfully disconnected ${member.user.tag}`);
+            }
+            
+            // Mute user for 10 minutes
+            const muteTime = 10 * 60 * 1000; // 10 minutes in milliseconds
+            await member.timeout(muteTime, reason);
+            console.log(`🔇 Successfully muted ${member.user.tag} for 10 minutes`);
+            
+        } catch (error) {
+            console.error(`❌ Failed to punish ${member.user.tag}:`, error.message);
+        }
+    }
+
 
     async login() {
         try {
