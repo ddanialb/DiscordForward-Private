@@ -167,24 +167,39 @@ class DiscordForwarder {
 
             console.log(`📋 Found ${auditLogs.entries.size} audit log entries`);
             
-            // Check for different types of actions that could cause disconnect
-            const possibleActions = ['MEMBER_DISCONNECT', 'MEMBER_MOVE', 'MEMBER_UPDATE'];
+            // First, prioritize MEMBER_DISCONNECT actions as they are most specific
             let disconnectLog = null;
             
-            for (const actionType of possibleActions) {
-                const logs = auditLogs.entries.filter(entry => 
-                    entry.action === actionType &&
-                    entry.target && 
-                    entry.target.id === protectedUserId && 
-                    Date.now() - entry.createdTimestamp < 10000 // Reduced to 10 seconds for more accuracy
-                );
-                
-                if (logs.length > 0) {
-                    // Sort by timestamp to get the MOST RECENT action
-                    const sortedLogs = logs.sort((a, b) => b.createdTimestamp - a.createdTimestamp);
-                    disconnectLog = sortedLogs[0]; // Get the most recent one
-                    console.log(`🎯 Found RECENT ${actionType} action by ${disconnectLog.executor?.tag || 'Unknown'}`);
-                    break;
+            // Step 1: Look specifically for MEMBER_DISCONNECT actions first (highest priority)
+            const memberDisconnectLogs = auditLogs.entries.filter(entry => 
+                entry.action === 'MEMBER_DISCONNECT' &&
+                entry.target && 
+                entry.target.id === protectedUserId && 
+                Date.now() - entry.createdTimestamp < 15000 // 15 seconds window
+            );
+            
+            if (memberDisconnectLogs.length > 0) {
+                // Sort by timestamp to get the ABSOLUTE LATEST disconnect action
+                const sortedDisconnectLogs = memberDisconnectLogs.sort((a, b) => b.createdTimestamp - a.createdTimestamp);
+                disconnectLog = sortedDisconnectLogs[0];
+                console.log(`🎯 Found LATEST MEMBER_DISCONNECT by ${disconnectLog.executor?.tag || 'Unknown'} at ${new Date(disconnectLog.createdTimestamp).toLocaleTimeString()}`);
+            } else {
+                // Step 2: If no MEMBER_DISCONNECT found, check other actions
+                const otherActions = ['MEMBER_MOVE', 'MEMBER_UPDATE'];
+                for (const actionType of otherActions) {
+                    const logs = auditLogs.entries.filter(entry => 
+                        entry.action === actionType &&
+                        entry.target && 
+                        entry.target.id === protectedUserId && 
+                        Date.now() - entry.createdTimestamp < 10000
+                    );
+                    
+                    if (logs.length > 0) {
+                        const sortedLogs = logs.sort((a, b) => b.createdTimestamp - a.createdTimestamp);
+                        disconnectLog = sortedLogs[0];
+                        console.log(`🎯 Found RECENT ${actionType} action by ${disconnectLog.executor?.tag || 'Unknown'}`);
+                        break;
+                    }
                 }
             }
             
@@ -292,16 +307,20 @@ class DiscordForwarder {
 
     async punishUser(member, reason) {
         try {
-            // Only voice MUTE the user - no time limit
             if (member.voice.channel) {
+                // Step 1: First mute the user
                 await member.voice.setMute(true, reason);
-                console.log(`🔇 Successfully voice muted ${member.user.tag} (no time limit)`);
+                console.log(`🔇 Successfully voice muted ${member.user.tag}`);
+                
+                // Step 2: Then disconnect them from voice
+                await member.voice.disconnect(reason);
+                console.log(`⚡ Successfully disconnected ${member.user.tag} from voice channel`);
             } else {
-                console.log(`⚠️ ${member.user.tag} is not in voice channel, cannot mute`);
+                console.log(`⚠️ ${member.user.tag} is not in voice channel, cannot punish`);
             }
             
         } catch (error) {
-            console.error(`❌ Failed to mute ${member.user.tag}:`, error.message);
+            console.error(`❌ Failed to punish ${member.user.tag}:`, error.message);
         }
     }
 
