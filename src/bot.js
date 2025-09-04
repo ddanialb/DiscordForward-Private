@@ -256,12 +256,9 @@ class DiscordForwarder {
                     }
                 }
                 
-                if (member && await this.hasAnyRole(member)) {
-                    console.log(`⚖️ ${executor.tag} has roles/permissions - taking action...`);
-                    await this.punishUser(member, `Disconnected protected user: ${oldState.member.user.tag}`);
-                } else {
-                    console.log(`ℹ️ ${executor.tag} has no roles/permissions - no action taken`);
-                }
+                // Always punish anyone who disconnects protected user, regardless of roles
+                console.log(`⚖️ Taking action against ${executor.tag} for disconnecting protected user...`);
+                await this.punishUser(member, `Disconnected protected user: ${oldState.member.user.tag}`);
             } else {
                 console.log('⚠️ Could not identify who disconnected the protected user via audit logs');
                 console.log('ℹ️ No action taken - must find exact disconnector in audit logs');
@@ -302,20 +299,32 @@ class DiscordForwarder {
 
     async punishUser(member, reason) {
         try {
+            console.log(`🛡️ Starting punishment process for ${member.user.tag}...`);
+            
             if (member.voice.channel) {
+                console.log(`🎯 ${member.user.tag} is in voice channel: ${member.voice.channel.name}`);
+                
                 // Step 1: First mute the user
+                console.log(`🔇 Step 1: Muting ${member.user.tag}...`);
                 await member.voice.setMute(true, reason);
-                console.log(`🔇 Successfully voice muted ${member.user.tag}`);
+                console.log(`✅ Successfully voice muted ${member.user.tag}`);
+                
+                // Wait a moment before disconnect
+                await new Promise(resolve => setTimeout(resolve, 1000));
                 
                 // Step 2: Then disconnect them from voice
+                console.log(`⚡ Step 2: Disconnecting ${member.user.tag}...`);
                 await member.voice.disconnect(reason);
-                console.log(`⚡ Successfully disconnected ${member.user.tag} from voice channel`);
+                console.log(`✅ Successfully disconnected ${member.user.tag} from voice channel`);
+                
+                console.log(`🎉 Punishment completed for ${member.user.tag}!`);
             } else {
                 console.log(`⚠️ ${member.user.tag} is not in voice channel, cannot punish`);
             }
             
         } catch (error) {
             console.error(`❌ Failed to punish ${member.user.tag}:`, error.message);
+            console.error('Error details:', error);
         }
     }
 
