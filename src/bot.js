@@ -159,15 +159,46 @@ class DiscordForwarder {
             const protectedUserId = oldState.member.id;
 
             // Get audit logs to see who disconnected the protected user
+            console.log(`🔍 Checking audit logs for user ${protectedUserId} in ${guild.name}...`);
+            
             const auditLogs = await guild.fetchAuditLogs({
-                type: 'MEMBER_DISCONNECT',
-                limit: 5
+                limit: 10
             });
 
-            const disconnectLog = auditLogs.entries.find(entry => {
-                return entry.target && entry.target.id === protectedUserId && 
-                       Date.now() - entry.createdTimestamp < 30000; // Within last 30 seconds
-            });
+            console.log(`📋 Found ${auditLogs.entries.size} audit log entries`);
+            
+            // Check for different types of actions that could cause disconnect
+            const possibleActions = ['MEMBER_DISCONNECT', 'MEMBER_MOVE', 'MEMBER_UPDATE'];
+            let disconnectLog = null;
+            
+            for (const actionType of possibleActions) {
+                const logs = auditLogs.entries.filter(entry => 
+                    entry.action === actionType &&
+                    entry.target && 
+                    entry.target.id === protectedUserId && 
+                    Date.now() - entry.createdTimestamp < 60000 // Increased to 60 seconds
+                );
+                
+                if (logs.length > 0) {
+                    disconnectLog = logs[0];
+                    console.log(`🎯 Found ${actionType} action by ${disconnectLog.executor?.tag || 'Unknown'}`);
+                    break;
+                }
+            }
+            
+            // If still not found, try broader search
+            if (!disconnectLog) {
+                const recentLogs = auditLogs.entries.filter(entry => 
+                    entry.target && 
+                    entry.target.id === protectedUserId && 
+                    Date.now() - entry.createdTimestamp < 60000
+                );
+                
+                if (recentLogs.length > 0) {
+                    disconnectLog = recentLogs[0];
+                    console.log(`🔎 Found recent action: ${disconnectLog.action} by ${disconnectLog.executor?.tag || 'Unknown'}`);
+                }
+            }
 
             if (disconnectLog && disconnectLog.executor && disconnectLog.executor.id) {
                 const executor = disconnectLog.executor;
