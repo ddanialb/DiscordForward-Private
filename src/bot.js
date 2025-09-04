@@ -162,13 +162,13 @@ class DiscordForwarder {
             console.log(`🔍 Checking audit logs for user ${protectedUserId} in ${guild.name}...`);
             
             let disconnectLog = null;
-            const { AuditLogEvent } = require('discord.js-selfbot-v13');
             
             // Try different approaches to find the disconnect action
+            // Using string values that work with discord.js-selfbot-v13
             const searchStrategies = [
-                { type: AuditLogEvent.MemberDisconnect, name: 'MemberDisconnect', limit: 20 },
-                { type: AuditLogEvent.MemberMove, name: 'MemberMove', limit: 20 },
-                { type: AuditLogEvent.MemberUpdate, name: 'MemberUpdate', limit: 20 }
+                { type: 'MEMBER_DISCONNECT', name: 'MemberDisconnect', limit: 20 },
+                { type: 'MEMBER_MOVE', name: 'MemberMove', limit: 20 },
+                { type: 'MEMBER_UPDATE', name: 'MemberUpdate', limit: 20 }
             ];
             
             for (const strategy of searchStrategies) {
