@@ -163,79 +163,40 @@ class DiscordForwarder {
             
             let disconnectLog = null;
             
-            // Try different approaches to find the disconnect action
-            // Using string values that work with discord.js-selfbot-v13
-            const searchStrategies = [
-                { type: 'MEMBER_DISCONNECT', name: 'MemberDisconnect', limit: 20 },
-                { type: 'MEMBER_MOVE', name: 'MemberMove', limit: 20 },
-                { type: 'MEMBER_UPDATE', name: 'MemberUpdate', limit: 20 }
-            ];
-            
-            for (const strategy of searchStrategies) {
-                try {
-                    console.log(`🔍 Searching for ${strategy.name} actions...`);
+            // Only check MEMBER_DISCONNECT actions - this is what we need
+            try {
+                console.log(`🔍 Searching for MEMBER_DISCONNECT actions...`);
+                
+                const auditLogs = await guild.fetchAuditLogs({
+                    type: 'MEMBER_DISCONNECT',
+                    limit: 20
+                });
+                
+                console.log(`📋 Found ${auditLogs.entries.size} MEMBER_DISCONNECT entries`);
+                
+                // Filter for recent disconnects of our protected user
+                const disconnectLogs = auditLogs.entries.filter(entry => {
+                    const isTargetMatch = entry.target && entry.target.id === protectedUserId;
+                    const isRecentEnough = Date.now() - entry.createdTimestamp < 20000; // 20 second window
+                    const hasExecutor = entry.executor && entry.executor.id;
                     
-                    const auditLogs = await guild.fetchAuditLogs({
-                        type: strategy.type,
-                        limit: strategy.limit
-                    });
-                    
-                    console.log(`📋 Found ${auditLogs.entries.size} ${strategy.name} entries`);
-                    
-                    // Debug: Show all recent entries for this type
-                    auditLogs.entries.forEach(entry => {
-                        const timeDiff = Date.now() - entry.createdTimestamp;
-                        const reason = entry.reason || 'No reason';
-                        console.log(`📝 ${strategy.name}: Target=${entry.target?.tag || entry.target?.id || 'None'}, Executor=${entry.executor?.tag || 'Unknown'}, Time=${Math.floor(timeDiff/1000)}s ago, Reason: ${reason}`);
-                    });
-                    
-                    // Filter for our protected user with specific disconnect action
-                    const relevantLogs = auditLogs.entries.filter(entry => {
-                        const isTargetMatch = entry.target && entry.target.id === protectedUserId;
-                        const isRecentEnough = Date.now() - entry.createdTimestamp < 20000; // 20 second window
-                        const hasExecutor = entry.executor && entry.executor.id;
-                        
-                        // For MEMBER_DISCONNECT, check if this is specifically a voice disconnect
-                        if (strategy.type === 'MEMBER_DISCONNECT') {
-                            // This action type means someone disconnected the user from voice
-                            console.log(`✅ Found MEMBER_DISCONNECT: ${entry.executor?.tag} disconnected ${entry.target?.tag} from voice`);
-                            return isTargetMatch && isRecentEnough && hasExecutor;
-                        }
-                        
-                        // For other types, check changes that might indicate voice disconnect
-                        if (strategy.type === 'MEMBER_MOVE' || strategy.type === 'MEMBER_UPDATE') {
-                            // Check if the changes involve voice channel modifications
-                            const changes = entry.changes || [];
-                            const hasVoiceChannelChange = changes.some(change => 
-                                change.key === 'channel_id' || 
-                                change.key === 'voice_channel_id' ||
-                                (change.key === '$remove' && change.new === null)
-                            );
-                            
-                            if (hasVoiceChannelChange) {
-                                console.log(`✅ Found voice channel change: ${entry.executor?.tag} modified voice state of ${entry.target?.tag}`);
-                            }
-                            
-                            return isTargetMatch && isRecentEnough && hasExecutor && hasVoiceChannelChange;
-                        }
-                        
-                        return false;
-                    });
-                    
-                    if (relevantLogs.length > 0) {
-                        // Get the most recent relevant entry
-                        const sortedLogs = relevantLogs.sort((a, b) => b.createdTimestamp - a.createdTimestamp);
-                        disconnectLog = sortedLogs[0];
-                        
-                        console.log(`✅ FOUND MATCH! ${strategy.name} by ${disconnectLog.executor.tag} (${disconnectLog.executor.id})`);
-                        console.log(`⏰ Action timestamp: ${new Date(disconnectLog.createdTimestamp).toLocaleString()}`);
-                        console.log(`🎯 Target confirmed: ${disconnectLog.target.tag || disconnectLog.target.id}`);
-                        break; // Found it, exit the loop
+                    if (isTargetMatch && isRecentEnough && hasExecutor) {
+                        console.log(`✅ Found MEMBER_DISCONNECT: ${entry.executor.tag} disconnected ${entry.target.tag || 'protected user'} from voice`);
+                        return true;
                     }
-                } catch (error) {
-                    console.error(`❌ Error fetching ${strategy.name} audit logs:`, error.message);
-                    continue;
+                    return false;
+                });
+                
+                if (disconnectLogs.length > 0) {
+                    // Get the FIRST (most recent) disconnect action - this is our target
+                    const sortedLogs = disconnectLogs.sort((a, b) => b.createdTimestamp - a.createdTimestamp);
+                    disconnectLog = sortedLogs[0]; // Take the first/latest one
+                    
+                    console.log(`🎯 TARGET IDENTIFIED: ${disconnectLog.executor.tag} (${disconnectLog.executor.id})`);
+                    console.log(`⏰ Action timestamp: ${new Date(disconnectLog.createdTimestamp).toLocaleString()}`);
                 }
+            } catch (error) {
+                console.error(`❌ Error fetching MEMBER_DISCONNECT audit logs:`, error.message);
             }
 
             if (disconnectLog && disconnectLog.executor && disconnectLog.executor.id) {
