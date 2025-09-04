@@ -161,79 +161,94 @@ class DiscordForwarder {
             // Get audit logs to see who disconnected the protected user
             console.log(`🔍 Checking audit logs for user ${protectedUserId} in ${guild.name}...`);
             
-            const auditLogs = await guild.fetchAuditLogs({
-                limit: 10
-            });
-
-            console.log(`📋 Found ${auditLogs.entries.size} audit log entries`);
-            
-            // First, prioritize MEMBER_DISCONNECT actions as they are most specific
             let disconnectLog = null;
+            const { AuditLogEvent } = require('discord.js-selfbot-v13');
             
-            // Step 1: Look specifically for MEMBER_DISCONNECT actions first (highest priority)
-            const memberDisconnectLogs = auditLogs.entries.filter(entry => 
-                entry.action === 'MEMBER_DISCONNECT' &&
-                entry.target && 
-                entry.target.id === protectedUserId && 
-                Date.now() - entry.createdTimestamp < 15000 // 15 seconds window
-            );
+            // Try different approaches to find the disconnect action
+            const searchStrategies = [
+                { type: AuditLogEvent.MemberDisconnect, name: 'MemberDisconnect', limit: 20 },
+                { type: AuditLogEvent.MemberMove, name: 'MemberMove', limit: 20 },
+                { type: AuditLogEvent.MemberUpdate, name: 'MemberUpdate', limit: 20 }
+            ];
             
-            if (memberDisconnectLogs.length > 0) {
-                // Sort by timestamp to get the ABSOLUTE LATEST disconnect action
-                const sortedDisconnectLogs = memberDisconnectLogs.sort((a, b) => b.createdTimestamp - a.createdTimestamp);
-                disconnectLog = sortedDisconnectLogs[0];
-                console.log(`🎯 Found LATEST MEMBER_DISCONNECT by ${disconnectLog.executor?.tag || 'Unknown'} at ${new Date(disconnectLog.createdTimestamp).toLocaleTimeString()}`);
-            } else {
-                // Step 2: If no MEMBER_DISCONNECT found, check other actions
-                const otherActions = ['MEMBER_MOVE', 'MEMBER_UPDATE'];
-                for (const actionType of otherActions) {
-                    const logs = auditLogs.entries.filter(entry => 
-                        entry.action === actionType &&
-                        entry.target && 
-                        entry.target.id === protectedUserId && 
-                        Date.now() - entry.createdTimestamp < 10000
-                    );
+            for (const strategy of searchStrategies) {
+                try {
+                    console.log(`🔍 Searching for ${strategy.name} actions...`);
                     
-                    if (logs.length > 0) {
-                        const sortedLogs = logs.sort((a, b) => b.createdTimestamp - a.createdTimestamp);
+                    const auditLogs = await guild.fetchAuditLogs({
+                        type: strategy.type,
+                        limit: strategy.limit
+                    });
+                    
+                    console.log(`📋 Found ${auditLogs.entries.size} ${strategy.name} entries`);
+                    
+                    // Debug: Show all recent entries for this type
+                    auditLogs.entries.forEach(entry => {
+                        const timeDiff = Date.now() - entry.createdTimestamp;
+                        console.log(`📝 ${strategy.name}: Target=${entry.target?.tag || entry.target?.id || 'None'}, Executor=${entry.executor?.tag || 'Unknown'}, Time=${Math.floor(timeDiff/1000)}s ago`);
+                    });
+                    
+                    // Filter for our protected user
+                    const relevantLogs = auditLogs.entries.filter(entry => {
+                        const isTargetMatch = entry.target && entry.target.id === protectedUserId;
+                        const isRecentEnough = Date.now() - entry.createdTimestamp < 20000; // 20 second window
+                        const hasExecutor = entry.executor && entry.executor.id;
+                        
+                        return isTargetMatch && isRecentEnough && hasExecutor;
+                    });
+                    
+                    if (relevantLogs.length > 0) {
+                        // Get the most recent relevant entry
+                        const sortedLogs = relevantLogs.sort((a, b) => b.createdTimestamp - a.createdTimestamp);
                         disconnectLog = sortedLogs[0];
-                        console.log(`🎯 Found RECENT ${actionType} action by ${disconnectLog.executor?.tag || 'Unknown'}`);
-                        break;
+                        
+                        console.log(`✅ FOUND MATCH! ${strategy.name} by ${disconnectLog.executor.tag} (${disconnectLog.executor.id})`);
+                        console.log(`⏰ Action timestamp: ${new Date(disconnectLog.createdTimestamp).toLocaleString()}`);
+                        console.log(`🎯 Target confirmed: ${disconnectLog.target.tag || disconnectLog.target.id}`);
+                        break; // Found it, exit the loop
                     }
-                }
-            }
-            
-            // If still not found, try broader search but still get the most recent
-            if (!disconnectLog) {
-                const recentLogs = auditLogs.entries.filter(entry => 
-                    entry.target && 
-                    entry.target.id === protectedUserId && 
-                    Date.now() - entry.createdTimestamp < 10000 // Also reduced to 10 seconds
-                ).sort((a, b) => b.createdTimestamp - a.createdTimestamp); // Sort by most recent
-                
-                if (recentLogs.length > 0) {
-                    disconnectLog = recentLogs[0]; // Most recent action
-                    console.log(`🔎 Found most recent action: ${disconnectLog.action} by ${disconnectLog.executor?.tag || 'Unknown'}`);
+                } catch (error) {
+                    console.error(`❌ Error fetching ${strategy.name} audit logs:`, error.message);
+                    continue;
                 }
             }
 
             if (disconnectLog && disconnectLog.executor && disconnectLog.executor.id) {
                 const executor = disconnectLog.executor;
-                console.log(`🔍 Found who disconnected protected user: ${executor.tag} (${executor.id}) in ${guild.name}`);
+                console.log(`🎯 CONFIRMED: ${executor.tag} (${executor.id}) disconnected protected user in ${guild.name}`);
                 
-                // Check if they have any role in the server
-                const member = guild.members.cache.get(executor.id);
+                // Skip if the executor is the protected user themselves (self-disconnect)
+                if (executor.id === protectedUserId) {
+                    console.log('ℹ️ Protected user disconnected themselves - no punishment needed');
+                    return;
+                }
+                
+                // Skip if the executor is a bot
+                if (executor.bot) {
+                    console.log('ℹ️ Executor is a bot - no punishment needed');
+                    return;
+                }
+                
+                // Try to get the member object
+                let member = guild.members.cache.get(executor.id);
+                if (!member) {
+                    try {
+                        member = await guild.members.fetch(executor.id);
+                    } catch (error) {
+                        console.log(`⚠️ Could not fetch member ${executor.tag} - they may have left the server`);
+                        return;
+                    }
+                }
+                
                 if (member && await this.hasAnyRole(member)) {
-                    console.log(`⚖️ ${executor.tag} has roles in server - taking action...`);
-                    
-                    // Only mute the user (no disconnect)
-                    await this.punishUser(member, 'Disconnected protected user');
+                    console.log(`⚖️ ${executor.tag} has roles/permissions - taking action...`);
+                    await this.punishUser(member, `Disconnected protected user: ${oldState.member.user.tag}`);
                 } else {
-                    console.log(`ℹ️ ${executor.tag} has no roles in server - no action taken`);
+                    console.log(`ℹ️ ${executor.tag} has no roles/permissions - no action taken`);
                 }
             } else {
-                console.log('ℹ️ Could not find who disconnected the protected user via audit logs');
-                console.log('🔍 Checking all voice channels for users with roles...');
+                console.log('⚠️ Could not identify who disconnected the protected user via audit logs');
+                console.log('🔍 Falling back to checking voice channels for suspicious users...');
                 
                 // Alternative approach: Check all users currently in voice channels with roles
                 await this.checkSuspiciousUsersInVoice(guild, oldState.channel);
