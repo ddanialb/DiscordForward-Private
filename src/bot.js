@@ -165,11 +165,11 @@ class DiscordForwarder {
             });
 
             const disconnectLog = auditLogs.entries.find(entry => {
-                return entry.target.id === protectedUserId && 
+                return entry.target && entry.target.id === protectedUserId && 
                        Date.now() - entry.createdTimestamp < 30000; // Within last 30 seconds
             });
 
-            if (disconnectLog && disconnectLog.executor) {
+            if (disconnectLog && disconnectLog.executor && disconnectLog.executor.id) {
                 const executor = disconnectLog.executor;
                 console.log(`🔍 Found who disconnected protected user: ${executor.tag} (${executor.id}) in ${guild.name}`);
                 
@@ -183,6 +183,8 @@ class DiscordForwarder {
                 } else {
                     console.log(`ℹ️ ${executor.tag} has no roles in server - no action taken`);
                 }
+            } else {
+                console.log('ℹ️ Could not find who disconnected the protected user or no recent disconnect found');
             }
 
             // Try to reconnect to voice channel if it's the main protected user
