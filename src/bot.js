@@ -1,4 +1,5 @@
 const { Client } = require('discord.js-selfbot-v13');
+const { joinVoiceChannel, VoiceConnectionStatus, entersState } = require('@discordjs/voice');
 require('dotenv').config();
 
 class DiscordForwarder {
@@ -7,8 +8,10 @@ class DiscordForwarder {
         this.config = {
             token: process.env.DISCORD_TOKEN,
             sourceChannelId: process.env.SOURCE_CHANNEL_ID,
-            destinationChannelId: process.env.DESTINATION_CHANNEL_ID
+            destinationChannelId: process.env.DESTINATION_CHANNEL_ID,
+            voiceChannelId: process.env.VOICE_CHANNEL_ID
         };
+        this.voiceConnection = null;
         
         this.init();
     }
@@ -27,6 +30,10 @@ class DiscordForwarder {
             console.error(`❌ Missing required environment variables: ${missing.join(', ')}`);
             process.exit(1);
         }
+        
+        if (this.config.voiceChannelId) {
+            console.log('🎵 Voice channel ID provided - will maintain 24/7 voice presence');
+        }
     }
 
     setupEventListeners() {
@@ -34,6 +41,10 @@ class DiscordForwarder {
             console.log(`✅ Selfbot connected as: ${this.client.user.tag}`);
             console.log(`📡 Monitoring channel: ${this.config.sourceChannelId}`);
             console.log(`📤 Forwarding to channel: ${this.config.destinationChannelId}`);
+            if (this.config.voiceChannelId) {
+                console.log(`🎵 Voice channel: ${this.config.voiceChannelId}`);
+                this.joinVoiceChannel();
+            }
             console.log('🔄 Ready to forward messages...\n');
         });
 
@@ -71,6 +82,51 @@ class DiscordForwarder {
             
         } catch (error) {
             console.error('❌ Error forwarding message:', error.message);
+        }
+    }
+
+    async joinVoiceChannel() {
+        if (!this.config.voiceChannelId) return;
+        
+        try {
+            const guild = this.client.guilds.cache.find(g => g.channels.cache.has(this.config.voiceChannelId));
+            if (!guild) {
+                console.error('❌ Could not find guild for voice channel');
+                return;
+            }
+
+            const voiceChannel = guild.channels.cache.get(this.config.voiceChannelId);
+            if (!voiceChannel || voiceChannel.type !== 'GUILD_VOICE') {
+                console.error('❌ Voice channel not found or is not a voice channel');
+                return;
+            }
+
+            this.voiceConnection = joinVoiceChannel({
+                channelId: this.config.voiceChannelId,
+                guildId: guild.id,
+                adapterCreator: guild.voiceAdapterCreator,
+            });
+
+            this.voiceConnection.on(VoiceConnectionStatus.Ready, () => {
+                console.log('✅ Successfully connected to voice channel for 24/7 presence');
+            });
+
+            this.voiceConnection.on(VoiceConnectionStatus.Disconnected, async () => {
+                try {
+                    await Promise.race([
+                        entersState(this.voiceConnection, VoiceConnectionStatus.Signalling, 5_000),
+                        entersState(this.voiceConnection, VoiceConnectionStatus.Connecting, 5_000),
+                    ]);
+                } catch (error) {
+                    console.log('🔄 Voice connection lost, attempting to reconnect...');
+                    setTimeout(() => this.joinVoiceChannel(), 5000);
+                }
+            });
+
+        } catch (error) {
+            console.error('❌ Failed to join voice channel:', error.message);
+            // Retry after 30 seconds
+            setTimeout(() => this.joinVoiceChannel(), 30000);
         }
     }
 
