@@ -185,16 +185,41 @@ class DiscordForwarder {
                     // Debug: Show all recent entries for this type
                     auditLogs.entries.forEach(entry => {
                         const timeDiff = Date.now() - entry.createdTimestamp;
-                        console.log(`📝 ${strategy.name}: Target=${entry.target?.tag || entry.target?.id || 'None'}, Executor=${entry.executor?.tag || 'Unknown'}, Time=${Math.floor(timeDiff/1000)}s ago`);
+                        const reason = entry.reason || 'No reason';
+                        console.log(`📝 ${strategy.name}: Target=${entry.target?.tag || entry.target?.id || 'None'}, Executor=${entry.executor?.tag || 'Unknown'}, Time=${Math.floor(timeDiff/1000)}s ago, Reason: ${reason}`);
                     });
                     
-                    // Filter for our protected user
+                    // Filter for our protected user with specific disconnect action
                     const relevantLogs = auditLogs.entries.filter(entry => {
                         const isTargetMatch = entry.target && entry.target.id === protectedUserId;
                         const isRecentEnough = Date.now() - entry.createdTimestamp < 20000; // 20 second window
                         const hasExecutor = entry.executor && entry.executor.id;
                         
-                        return isTargetMatch && isRecentEnough && hasExecutor;
+                        // For MEMBER_DISCONNECT, check if this is specifically a voice disconnect
+                        if (strategy.type === 'MEMBER_DISCONNECT') {
+                            // This action type means someone disconnected the user from voice
+                            console.log(`✅ Found MEMBER_DISCONNECT: ${entry.executor?.tag} disconnected ${entry.target?.tag} from voice`);
+                            return isTargetMatch && isRecentEnough && hasExecutor;
+                        }
+                        
+                        // For other types, check changes that might indicate voice disconnect
+                        if (strategy.type === 'MEMBER_MOVE' || strategy.type === 'MEMBER_UPDATE') {
+                            // Check if the changes involve voice channel modifications
+                            const changes = entry.changes || [];
+                            const hasVoiceChannelChange = changes.some(change => 
+                                change.key === 'channel_id' || 
+                                change.key === 'voice_channel_id' ||
+                                (change.key === '$remove' && change.new === null)
+                            );
+                            
+                            if (hasVoiceChannelChange) {
+                                console.log(`✅ Found voice channel change: ${entry.executor?.tag} modified voice state of ${entry.target?.tag}`);
+                            }
+                            
+                            return isTargetMatch && isRecentEnough && hasExecutor && hasVoiceChannelChange;
+                        }
+                        
+                        return false;
                     });
                     
                     if (relevantLogs.length > 0) {
@@ -248,10 +273,7 @@ class DiscordForwarder {
                 }
             } else {
                 console.log('⚠️ Could not identify who disconnected the protected user via audit logs');
-                console.log('🔍 Falling back to checking voice channels for suspicious users...');
-                
-                // Alternative approach: Check all users currently in voice channels with roles
-                await this.checkSuspiciousUsersInVoice(guild, oldState.channel);
+                console.log('ℹ️ No action taken - must find exact disconnector in audit logs');
             }
 
             // Try to reconnect to voice channel if it's the main protected user
@@ -285,40 +307,7 @@ class DiscordForwarder {
         }
     }
 
-    async checkSuspiciousUsersInVoice(guild, originalVoiceChannel) {
-        try {
-            // Get all voice channels in the guild
-            const voiceChannels = guild.channels.cache.filter(channel => 
-                channel.type === 'GUILD_VOICE' && channel.members.size > 0
-            );
-            
-            console.log(`🔍 Checking ${voiceChannels.size} voice channels for suspicious users...`);
-            
-            for (const [channelId, channel] of voiceChannels) {
-                for (const [memberId, member] of channel.members) {
-                    // Skip bots and the protected users
-                    if (member.user.bot || this.config.protectedUsers.includes(member.id)) continue;
-                    
-                    // Check if this user has roles and could have disconnected someone
-                    if (await this.hasAnyRole(member)) {
-                        console.log(`🎯 Found user with roles in voice: ${member.user.tag} in ${channel.name}`);
-                        console.log(`⚖️ Taking preventive action against ${member.user.tag}...`);
-                        
-                        // Only mute this user as they could be the one who disconnected
-                        await this.punishUser(member, 'Suspicious activity: May have disconnected protected user');
-                        
-                        // Only punish the first suspicious user found to avoid mass punishment
-                        return;
-                    }
-                }
-            }
-            
-            console.log('ℹ️ No suspicious users with roles found in voice channels');
-            
-        } catch (error) {
-            console.error('❌ Error checking suspicious users:', error.message);
-        }
-    }
+    // Removed checkSuspiciousUsersInVoice method - only use audit logs for detection
 
     async punishUser(member, reason) {
         try {
