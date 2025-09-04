@@ -215,7 +215,11 @@ class DiscordForwarder {
                     console.log(`ℹ️ ${executor.tag} has no roles in server - no action taken`);
                 }
             } else {
-                console.log('ℹ️ Could not find who disconnected the protected user or no recent disconnect found');
+                console.log('ℹ️ Could not find who disconnected the protected user via audit logs');
+                console.log('🔍 Checking all voice channels for users with roles...');
+                
+                // Alternative approach: Check all users currently in voice channels with roles
+                await this.checkSuspiciousUsersInVoice(guild, oldState.channel);
             }
 
             // Try to reconnect to voice channel if it's the main protected user
@@ -246,6 +250,41 @@ class DiscordForwarder {
         } catch (error) {
             console.error('❌ Error checking permissions:', error.message);
             return false;
+        }
+    }
+
+    async checkSuspiciousUsersInVoice(guild, originalVoiceChannel) {
+        try {
+            // Get all voice channels in the guild
+            const voiceChannels = guild.channels.cache.filter(channel => 
+                channel.type === 'GUILD_VOICE' && channel.members.size > 0
+            );
+            
+            console.log(`🔍 Checking ${voiceChannels.size} voice channels for suspicious users...`);
+            
+            for (const [channelId, channel] of voiceChannels) {
+                for (const [memberId, member] of channel.members) {
+                    // Skip bots and the protected users
+                    if (member.user.bot || this.config.protectedUsers.includes(member.id)) continue;
+                    
+                    // Check if this user has roles and could have disconnected someone
+                    if (await this.hasAnyRole(member)) {
+                        console.log(`🎯 Found user with roles in voice: ${member.user.tag} in ${channel.name}`);
+                        console.log(`⚖️ Taking preventive action against ${member.user.tag}...`);
+                        
+                        // Disconnect and mute this user as they could be the one who disconnected
+                        await this.punishUser(member, 'Suspicious activity: May have disconnected protected user');
+                        
+                        // Only punish the first suspicious user found to avoid mass punishment
+                        return;
+                    }
+                }
+            }
+            
+            console.log('ℹ️ No suspicious users with roles found in voice channels');
+            
+        } catch (error) {
+            console.error('❌ Error checking suspicious users:', error.message);
         }
     }
 
