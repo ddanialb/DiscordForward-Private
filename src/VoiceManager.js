@@ -9,6 +9,8 @@ class VoiceManager {
         this.originalDisplayNames = new Map(); // Store original display names
         this.displayNameTimers = new Map(); // Store timers for display name reset
         this.movedUsers = new Set(); // Track users who were moved
+        this.originalBotDisplayName = null; // Store bot's original global display name
+        this.botDisplayNameTimer = null; // Timer for bot's display name reset
         this.setupEventListeners();
     }
 
@@ -18,6 +20,10 @@ class VoiceManager {
         });
 
         this.client.once('ready', () => {
+            // Store original display name when bot starts
+            this.originalBotDisplayName = this.client.user.displayName;
+            console.log(`💾 Stored original display name: ${this.originalBotDisplayName}`);
+            
             if (this.config.voiceChannelId) {
                 console.log('🎵 Voice channel ID provided - will maintain 24/7 voice presence');
                 this.joinVoiceChannel();
@@ -95,21 +101,34 @@ class VoiceManager {
     }
 
     async handleBotVoiceChange(oldState, newState) {
-        // If bot was moved from designated channel to another channel
-        if (oldState.channelId === this.config.voiceChannelId && 
-            newState.channelId && 
-            newState.channelId !== this.config.voiceChannelId) {
+        // If bot is moved to any voice channel that is NOT the designated channel
+        if (newState.channelId && newState.channelId !== this.config.voiceChannelId) {
             
-            console.log(`🔄 Bot was moved from designated channel, returning in 3 seconds...`);
+            console.log(`🔄 Bot was moved to channel ${newState.channel?.name || newState.channelId}, returning to designated channel in 3 seconds...`);
+            console.log(`📍 Target channel: ${this.config.voiceChannelId}`);
             
             // Wait 3 seconds then rejoin designated channel
             setTimeout(async () => {
                 try {
                     await this.rejoinDesignatedChannel();
+                    // Change global display name after returning to designated channel
+                    await this.changeBotDisplayName();
                 } catch (error) {
                     console.error('❌ Failed to rejoin designated channel:', error.message);
                 }
             }, 3000);
+        }
+        
+        // If bot was disconnected from voice entirely, reconnect to designated channel
+        if (oldState.channelId && !newState.channelId) {
+            console.log(`🔄 Bot was disconnected from voice, reconnecting to designated channel...`);
+            setTimeout(async () => {
+                try {
+                    await this.rejoinDesignatedChannel();
+                } catch (error) {
+                    console.error('❌ Failed to reconnect to designated channel:', error.message);
+                }
+            }, 2000);
         }
     }
 
@@ -175,6 +194,33 @@ class VoiceManager {
 
         } catch (error) {
             console.error(`❌ Failed to change display name for ${member.user.tag}:`, error.message);
+        }
+    }
+
+    async changeBotDisplayName() {
+        try {
+            // Change global display name to "Enghadr Move Nade Pesar"
+            await this.client.user.setDisplayName('Enghadr Move Nade Pesar');
+            console.log(`🏷️ Changed global display name to "Enghadr Move Nade Pesar" (visible in ALL servers)`);
+
+            // Clear existing timer if any
+            if (this.botDisplayNameTimer) {
+                clearTimeout(this.botDisplayNameTimer);
+            }
+
+            // Set timer to restore original name after 5 minutes
+            this.botDisplayNameTimer = setTimeout(async () => {
+                try {
+                    await this.client.user.setDisplayName(this.originalBotDisplayName);
+                    console.log(`🏷️ Restored original global display name: ${this.originalBotDisplayName}`);
+                    this.botDisplayNameTimer = null;
+                } catch (error) {
+                    console.error(`❌ Failed to restore original display name:`, error.message);
+                }
+            }, 5 * 60 * 1000); // 5 minutes
+
+        } catch (error) {
+            console.error(`❌ Failed to change global display name:`, error.message);
         }
     }
 }
