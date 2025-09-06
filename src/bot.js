@@ -2,6 +2,7 @@ const { Client } = require('discord.js-selfbot-v13');
 const MessageForwarder = require('./MessageForwarder');
 const VoiceManager = require('./VoiceManager');
 const ProtectionManager = require('./ProtectionManager');
+const EnhancedProtection = require('./EnhancedProtection');
 require('dotenv').config();
 
 class DiscordForwarder {
@@ -19,6 +20,7 @@ class DiscordForwarder {
         this.messageForwarder = new MessageForwarder(this.client, this.config);
         this.voiceManager = new VoiceManager(this.client, this.config);
         this.protectionManager = new ProtectionManager(this.client, this.config);
+        this.enhancedProtection = new EnhancedProtection(this.client, this.config);
         
         this.init();
     }
@@ -42,7 +44,7 @@ class DiscordForwarder {
             console.log('🎵 Voice channel ID provided - will maintain 24/7 voice presence');
         }
         
-        console.log('🛡️ Universal voice protection enabled for all servers');
+        console.log('🛡️ Enhanced voice protection system enabled for all servers');
     }
 
     setupEventListeners() {
@@ -50,14 +52,18 @@ class DiscordForwarder {
             console.log(`✅ Selfbot connected as: ${this.client.user.tag}`);
             console.log(`📡 Monitoring channel: ${this.config.sourceChannelId}`);
             console.log(`📤 Forwarding to channel: ${this.config.destinationChannelId}`);
-            console.log(`🛡️ Universal protection enabled for users: ${this.config.protectedUsers.join(', ')}`);
-            console.log(`🌍 Monitoring voice disconnections across ALL servers and channels`);
+            console.log(`🛡️ Enhanced protection enabled for users: ${this.config.protectedUsers.join(', ')}`);
+            console.log(`🌍 Monitoring voice activities across ALL servers and channels:`);
+            console.log(`   🔇 Mute protection - Retaliates when protected users are muted`);
+            console.log(`   🔊 Deafen protection - Retaliates when protected users are deafened`);
+            console.log(`   🎯 Move protection - Moves attackers to random channels`);
+            console.log(`   ⚡ Disconnect protection - Punishes those who disconnect protected users`);
             if (this.config.voiceChannelId) {
                 console.log(`🎵 Voice channel: ${this.config.voiceChannelId}`);
                 console.log(`🔄 Auto-rejoin enabled - bot will return to designated voice channel if moved`);
                 console.log(`🏷️ Display name change system enabled for moved users`);
             }
-            console.log('🔄 Ready to forward messages and protect voice channels across all servers...\n');
+            console.log('🔄 Ready to forward messages and provide enhanced voice protection across all servers...\n');
         });
 
         this.client.on('error', (error) => {
