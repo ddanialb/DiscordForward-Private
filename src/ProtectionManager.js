@@ -128,6 +128,7 @@ class ProtectionManager {
         }
     }
 
+
     async punishUser(member, reason) {
         try {
             console.log(`🛡️ Starting punishment process for ${member.user.tag}...`);
