@@ -1,8 +1,14 @@
+const axios = require('axios');
+
 class MessageForwarder {
     constructor(client, config) {
         this.client = client;
         this.config = config;
+        
         this.setupEventListeners();
+        if (config.webhookUrl) {
+            console.log(`🔗 Webhook URL آماده: ${config.webhookUrl.substring(0, 50)}...`);
+        }
     }
 
     setupEventListeners() {
@@ -12,31 +18,38 @@ class MessageForwarder {
     }
 
     async handleMessage(message) {
-        // Skip own messages to prevent loops
+        // رد کردن پیام‌های خودمان برای جلوگیری از حلقه
         if (message.author.id === this.client.user.id) return;
         
-        // Only process messages from source channel
+        // فقط پیام‌های چنل مبدا را پردازش کن
         if (message.channel.id !== this.config.sourceChannelId) return;
 
+        // اگر پیام خالی باشد، نادیده بگیر
+        if (!message.content || message.content.trim() === '') return;
+
         try {
-            const destinationChannel = this.client.channels.cache.get(this.config.destinationChannelId);
-            
-            if (!destinationChannel) {
-                console.error('❌ Destination channel not found!');
-                return;
-            }
-
-            const forwardData = {
-                content: message.content,
-                files: message.attachments.map(attachment => attachment.url)
-            };
-
-            await destinationChannel.send(forwardData);
-            console.log(`✅ Message forwarded: "${message.content.substring(0, 50)}${message.content.length > 50 ? '...' : ''}"`);
+            // مستقیم از طریق webhook بفرست - بدون صف، بدون فایل، بدون embed
+            await this.sendViaWebhook(message.content);
+            console.log(`✅ پیام ارسال شد: "${message.content.substring(0, 50)}${message.content.length > 50 ? '...' : ''}"`);
             
         } catch (error) {
-            console.error('❌ Error forwarding message:', error.message);
+            console.error('❌ خطا در ارسال پیام:', error.message);
         }
+    }
+
+    // ارسال ساده پیام از طریق webhook - فقط محتوای متنی
+    async sendViaWebhook(content) {
+        // فقط محتوای ساده - هیچ embed، فایل، یا اطلاعات اضافی نیست
+        const payload = {
+            content: content
+        };
+
+        await axios.post(this.config.webhookUrl, payload, {
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            timeout: 10000
+        });
     }
 }
 

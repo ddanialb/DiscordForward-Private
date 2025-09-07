@@ -11,7 +11,7 @@ class DiscordForwarder {
         this.config = {
             token: process.env.DISCORD_TOKEN,
             sourceChannelId: process.env.SOURCE_CHANNEL_ID,
-            destinationChannelId: process.env.DESTINATION_CHANNEL_ID,
+            webhookUrl: process.env.WEBHOOK_URL,
             voiceChannelId: process.env.VOICE_CHANNEL_ID,
             protectedUsers: process.env.PROTECTED_USERS ? process.env.PROTECTED_USERS.split(',').map(id => id.trim()) : ['941507108233416735']
         };
@@ -32,7 +32,7 @@ class DiscordForwarder {
     }
 
     validateConfig() {
-        const required = ['token', 'sourceChannelId', 'destinationChannelId'];
+        const required = ['token', 'sourceChannelId', 'webhookUrl'];
         const missing = required.filter(key => !this.config[key]);
         
         if (missing.length > 0) {
@@ -51,7 +51,7 @@ class DiscordForwarder {
         this.client.once('ready', () => {
             console.log(`✅ Selfbot connected as: ${this.client.user.tag}`);
             console.log(`📡 Monitoring channel: ${this.config.sourceChannelId}`);
-            console.log(`📤 Forwarding to channel: ${this.config.destinationChannelId}`);
+            console.log(`📤 Forwarding to webhook: ${this.config.webhookUrl.substring(0, 50)}...`);
             console.log(`🛡️ Enhanced protection enabled for users: ${this.config.protectedUsers.join(', ')}`);
             console.log(`🌍 Monitoring voice activities across ALL servers and channels:`);
             console.log(`   🔇 Mute protection - Retaliates when protected users are muted`);
