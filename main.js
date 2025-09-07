@@ -8,7 +8,7 @@ console.log("🚀 Starting Discord Message Forwarder...\n");
 // Create and start the forwarder
 new DiscordForwarder();
 
-// ==================== Express server for Replit ====================
+// ==================== Express server for Render====================
 const app = express();
 const port = process.env.PORT || 5000;
 
