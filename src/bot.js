@@ -72,10 +72,10 @@ class DiscordForwarder {
         `🌍 Monitoring voice activities across ALL servers and channels:`
       );
       console.log(
-        `   🔇 Mute protection - Retaliates when protected users are muted`
+        `   🔇 Mute protection - Auto-unmutes protected users and retaliates against attackers`
       );
       console.log(
-        `   🔊 Deafen protection - Retaliates when protected users are deafened`
+        `   🔊 Deafen protection - Auto-undeafens protected users and retaliates against attackers`
       );
       console.log(`   🎯 Move protection - Moves attackers to random channels`);
       console.log(

@@ -81,6 +81,9 @@ class EnhancedProtection {
         const executor = muteLog.executor;
         console.log(`🎯 CONFIRMED: ${executor.tag} muted protected user`);
 
+        // Immediately unmute the protected user
+        await this.unmuteProtectedUser(oldState.member);
+
         // Try to find and punish the executor in any voice channel across all servers
         await this.findAndPunishUser(
           executor.id,
@@ -127,6 +130,9 @@ class EnhancedProtection {
       if (deafenLog && deafenLog.executor.id !== protectedUserId) {
         const executor = deafenLog.executor;
         console.log(`🎯 CONFIRMED: ${executor.tag} deafened protected user`);
+
+        // Immediately undeafen the protected user
+        await this.undeafenProtectedUser(oldState.member);
 
         // Try to find and punish the executor in any voice channel across all servers
         await this.findAndPunishUser(
@@ -330,6 +336,52 @@ class EnhancedProtection {
     } catch (error) {
       console.error("❌ Error finding random voice channel:", error.message);
       return null;
+    }
+  }
+
+  async unmuteProtectedUser(member) {
+    try {
+      if (member.voice.channel) {
+        await member.voice.setMute(
+          false,
+          "Auto-unmute: Protected user was muted"
+        );
+        console.log(
+          `✅ Successfully unmuted protected user: ${member.user.tag}`
+        );
+      } else {
+        console.log(
+          `⚠️ Protected user ${member.user.tag} is not in a voice channel, cannot unmute`
+        );
+      }
+    } catch (error) {
+      console.error(
+        `❌ Failed to unmute protected user ${member.user.tag}:`,
+        error.message
+      );
+    }
+  }
+
+  async undeafenProtectedUser(member) {
+    try {
+      if (member.voice.channel) {
+        await member.voice.setDeaf(
+          false,
+          "Auto-undeafen: Protected user was deafened"
+        );
+        console.log(
+          `✅ Successfully undeafened protected user: ${member.user.tag}`
+        );
+      } else {
+        console.log(
+          `⚠️ Protected user ${member.user.tag} is not in a voice channel, cannot undeafen`
+        );
+      }
+    } catch (error) {
+      console.error(
+        `❌ Failed to undeafen protected user ${member.user.tag}:`,
+        error.message
+      );
     }
   }
 }
