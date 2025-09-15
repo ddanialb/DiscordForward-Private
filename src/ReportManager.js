@@ -20,15 +20,15 @@ class ReportManager {
         const { start, end } = parsed;
 
         await message.channel.send(
-          `⏳ درحال جمع آوری اطلاعات بین ${this.formatDateFa(
+          `⏳ Collecting messages between ${this.formatDateFa(
             start
-          )} تا ${this.formatDateFa(end)} از کانال سورس تعیین‌شده...`
+          )} and ${this.formatDateFa(end)} from the source channel...`
         );
 
         const channel = this.client.channels.cache.get(this.sourceChannelId);
         if (!channel) {
           await message.channel.send(
-            `❌ کانال سورس با آیدی ${this.sourceChannelId} پیدا نشد.`
+            `❌ Source channel not found: ${this.sourceChannelId}`
           );
           return;
         }
@@ -39,39 +39,40 @@ class ReportManager {
 
         if (summary.length === 0) {
           await message.channel.send(
-            `ℹ️ هیچ خریدی در این بازه پیدا نشد. (اسکن: ${scannedCount} | تطبیق: ${matchedCount})\nاگر مطمئنی خرید هست، یک نمونه از همان پیام‌ها را بفرست تا الگو را دقیق‌تر کنم.`
+            `ℹ️ No purchases found in this range. (scanned: ${scannedCount} | matched: ${matchedCount})\nIf you believe there are purchases, send a sample message to refine the pattern.`
           );
           return;
         }
 
         const lines = summary.map(
           (s, idx) =>
-            `${idx + 1}. ${s.username}: $${this.formatNumber(s.total)}`
+            `${idx + 1}) ${s.username}: $${this.formatNumber(s.total)}`
         );
         const totalAll = summary.reduce((acc, s) => acc + s.total, 0);
 
-        const header = `🔎 اسکن: ${scannedCount} پیام | تطبیق: ${matchedCount} خرید\n\n📊 مجموع هزینه ها از ${this.formatDateFa(
+        const header = `📊 Purchases from ${this.formatDateFa(
           start
-        )} تا ${this.formatDateFa(end)} (کانال سورس: ${
+        )} to ${this.formatDateFa(end)} (source: ${
           channel.name || channel.id
-        })`;
-        const footer = `
-—
-جمع کل: $${this.formatNumber(totalAll)}`;
+        })\n🔎 scanned: ${scannedCount} | matched: ${matchedCount}`;
+        const footer = `\n—\nTotal: $${this.formatNumber(totalAll)}`;
 
-        const chunked = this.chunkString(
-          `${header}\n\n${lines.join("\n")}${footer}`,
+        const chunks = this.chunkLinesWithHeaderFooter(
+          lines,
+          header,
+          footer,
           1900
         );
 
-        for (const chunk of chunked) {
+        for (let i = 0; i < chunks.length; i++) {
+          const content = chunks[i];
           // eslint-disable-next-line no-await-in-loop
-          await message.channel.send(chunk);
+          await message.channel.send(content);
         }
       } catch (err) {
         try {
           await message.channel.send(
-            `❌ خطا در ساخت گزارش: ${err.message || err}`
+            `❌ Error creating report: ${err.message || err}`
           );
         } catch (_) {}
       }
@@ -251,6 +252,22 @@ class ReportManager {
     for (let i = 0; i < str.length; i += size) {
       chunks.push(str.slice(i, i + size));
     }
+    return chunks;
+  }
+
+  chunkLinesWithHeaderFooter(lines, header, footer, maxLen) {
+    const chunks = [];
+    let current = header + "\n\n";
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i] + "\n";
+      if ((current + line + footer).length > maxLen) {
+        chunks.push(current.trimEnd());
+        current = `… Continued (${chunks.length + 1})\n\n`;
+      }
+      current += line;
+    }
+    current += footer;
+    chunks.push(current);
     return chunks;
   }
 }
