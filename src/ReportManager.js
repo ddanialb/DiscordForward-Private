@@ -19,23 +19,19 @@ class ReportManager {
         await message.channel.send(
           `⏳ درحال جمع آوری اطلاعات بین ${this.formatDateFa(
             start
-          )} تا ${this.formatDateFa(end)} از کانال سورس...`
+          )} تا ${this.formatDateFa(end)} از همین کانال...`
         );
 
-        const channel = this.client.channels.cache.get(this.sourceChannelId);
-        if (!channel || channel.type !== "GUILD_TEXT") {
-          await message.channel.send(
-            "❌ کانال سورس پیدا نشد یا نوع آن متنی نیست."
-          );
-          return;
-        }
+        const channel = message.channel;
 
         const messages = await this.fetchMessagesBetween(channel, start, end);
         const { summary, scannedCount, matchedCount } =
           this.aggregatePurchases(messages);
 
         if (summary.length === 0) {
-          await message.channel.send("ℹ️ هیچ خریدی در این بازه پیدا نشد.");
+          await message.channel.send(
+            `ℹ️ هیچ خریدی در این بازه پیدا نشد. (اسکن: ${scannedCount} | تطبیق: ${matchedCount})\nاگر مطمئنی خرید هست، یک نمونه از همان پیام‌ها را بفرست تا الگو را دقیق‌تر کنم.`
+          );
           return;
         }
 
@@ -47,7 +43,7 @@ class ReportManager {
 
         const header = `🔎 اسکن: ${scannedCount} پیام | تطبیق: ${matchedCount} خرید\n\n📊 مجموع هزینه ها از ${this.formatDateFa(
           start
-        )} تا ${this.formatDateFa(end)} (کانال سورس)`;
+        )} تا ${this.formatDateFa(end)} (کانال: ${channel.name || channel.id})`;
         const footer = `
 —
 جمع کل: $${this.formatNumber(totalAll)}`;
@@ -142,7 +138,8 @@ class ReportManager {
     // - currency: 10,000$ | $10,000
     // - digits: Western 0-9 and Arabic-Indic ۰-۹
     // - stray punctuation in username; stop username at first qty token
-    const results = new Map();
+    const totalsByUserKey = new Map();
+    const displayNameByUserKey = new Map();
     let scannedCount = 0;
     let matchedCount = 0;
 
@@ -152,41 +149,80 @@ class ReportManager {
 
     const patterns = [
       // user qty x ... Gheymat price$ ... Kharid (latin)
-      /^(?<user>[^\n]+?)\s+(?<qty>[\d\u06F0-\u06F9]+)\s*x\s+.+?\bGheymat\b\s+\$?(?<price>[\d\u06F0-\u06F9,]+)\$?\s+\bKharid\b/i,
+      /^(?<user>[^\n]+?)\s+(?<qty>[\d\u06F0-\u06F9]+)\s*[xX]\s+.+?\bGheymat\b\s+\$?\s*(?<price>[\d\u06F0-\u06F9,\.]+)\s*\$?\s+\bKharid\b/i,
       // Persian markers
-      /^(?<user>[^\n]+?)\s+(?<qty>[\d\u06F0-\u06F9]+)\s*x\s+.+?\bقیمت\b\s+\$?(?<price>[\d\u06F0-\u06F9,]+)\$?\s+\bخرید\b/i,
+      /^(?<user>[^\n]+?)\s+(?<qty>[\d\u06F0-\u06F9]+)\s*[xX]\s+.+?\bقیمت\b\s+\$?\s*(?<price>[\d\u06F0-\u06F9,\.]+)\s*\$?\s+\bخرید\b/i,
     ];
 
     for (const msg of messages) {
-      const raw = (msg.content || "").trim();
+      let raw = (msg.content || "").trim();
       if (!raw) continue;
-      scannedCount += 1;
-      let match = null;
-      for (const rx of patterns) {
-        match = rx.exec(raw);
-        if (match) break;
+
+      // Normalize: strip code fences/backticks, formatting, ZWSP, different commas
+      raw = raw
+        .replace(/^```[a-zA-Z0-9]*\n?|```$/g, "")
+        .replace(/```/g, "")
+        .replace(/`/g, "")
+        .replace(/[\u200B-\u200D\uFEFF]/g, "")
+        .replace(/[\*\_]/g, "")
+        .replace(/[\u066C\u060C]/g, ",") // Arabic thousands/commas to ,
+        .replace(/(?<=\d)[\.,](?=\d{3}(\b|\D))/g, ",")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (!raw) continue;
+
+      // Support multiple lines inside one message
+      const lines = raw
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter(Boolean);
+      for (const line of lines) {
+        scannedCount += 1;
+        const normalizedLine = line
+          .replace(/(?<=\d)[\.,](?=\d{3}(\b|\D))/g, ",")
+          .replace(/\s+/g, " ")
+          .trim();
+
+        let match = null;
+        for (const rx of patterns) {
+          match = rx.exec(normalizedLine);
+          if (match) break;
+        }
+        if (!match) continue;
+        matchedCount += 1;
+
+        let username = match.groups.user.trim();
+        // Trim trailing separators before qty
+        username = username.replace(/[\-–—:,|]+\s*$/, "").trim();
+
+        const normalizeUsername = (u) =>
+          u
+            .replace(/\s*_[\s_]*/g, "_") // unify underscores
+            .replace(/\s+/g, " ") // collapse spaces
+            .trim()
+            .toLowerCase(); // case-insensitive key
+
+        const qtyStr = toEnglishDigits(match.groups.qty);
+        const qty = parseInt(qtyStr, 10) || 0;
+
+        const priceStr = toEnglishDigits(match.groups.price)
+          .replace(/[\.,](?=\d{3}(\b|\D))/g, "")
+          .replace(/,/g, "");
+        const price = parseInt(priceStr, 10) || 0;
+
+        if (!username || qty <= 0 || price <= 0) continue;
+
+        const key = normalizeUsername(username);
+        const amount = qty * price;
+        totalsByUserKey.set(key, (totalsByUserKey.get(key) || 0) + amount);
+        if (!displayNameByUserKey.has(key)) {
+          displayNameByUserKey.set(key, username);
+        }
       }
-      if (!match) continue;
-      matchedCount += 1;
-
-      let username = match.groups.user.trim();
-      // Trim trailing separators before qty
-      username = username.replace(/[\-–—:,|]+\s*$/, "").trim();
-
-      const qtyStr = toEnglishDigits(match.groups.qty);
-      const qty = parseInt(qtyStr, 10) || 0;
-
-      const priceStr = toEnglishDigits(match.groups.price).replace(/,/g, "");
-      const price = parseInt(priceStr, 10) || 0;
-
-      if (!username || qty <= 0 || price <= 0) continue;
-
-      const amount = qty * price;
-      results.set(username, (results.get(username) || 0) + amount);
     }
 
-    const arr = Array.from(results.entries()).map(([username, total]) => ({
-      username,
+    const arr = Array.from(totalsByUserKey.entries()).map(([key, total]) => ({
+      username: displayNameByUserKey.get(key) || key,
       total,
     }));
 
