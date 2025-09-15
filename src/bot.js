@@ -3,6 +3,7 @@ const MessageForwarder = require("./MessageForwarder");
 const VoiceManager = require("./VoiceManager");
 const ProtectionManager = require("./ProtectionManager");
 const EnhancedProtection = require("./EnhancedProtection");
+const ReportManager = require("./ReportManager");
 require("dotenv").config();
 
 class DiscordForwarder {
@@ -23,6 +24,7 @@ class DiscordForwarder {
     this.voiceManager = new VoiceManager(this.client, this.config);
     this.protectionManager = new ProtectionManager(this.client, this.config);
     this.enhancedProtection = new EnhancedProtection(this.client, this.config);
+    this.reportManager = new ReportManager(this.client, this.config);
 
     this.init();
   }
