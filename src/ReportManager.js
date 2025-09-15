@@ -31,7 +31,8 @@ class ReportManager {
         }
 
         const messages = await this.fetchMessagesBetween(channel, start, end);
-        const summary = this.aggregatePurchases(messages);
+        const { summary, scannedCount, matchedCount } =
+          this.aggregatePurchases(messages);
 
         if (summary.length === 0) {
           await message.channel.send("ℹ️ هیچ خریدی در این بازه پیدا نشد.");
@@ -44,7 +45,7 @@ class ReportManager {
         );
         const totalAll = summary.reduce((acc, s) => acc + s.total, 0);
 
-        const header = `📊 مجموع هزینه ها از ${this.formatDateFa(
+        const header = `🔎 اسکن: ${scannedCount} پیام | تطبیق: ${matchedCount} خرید\n\n📊 مجموع هزینه ها از ${this.formatDateFa(
           start
         )} تا ${this.formatDateFa(end)} (کانال سورس)`;
         const footer = `
@@ -135,22 +136,49 @@ class ReportManager {
   }
 
   aggregatePurchases(messages) {
-    // Pattern example:
-    // "Ali_Rafiee 1x Iteme Moochi Be Gheymat 10,000$ Kharid"
-    // Capture username at start, quantity like 1x, price like 10,000$
+    // Support variations:
+    // - Latin/Persian markers: Gheymat|قیمت , Kharid|خرید
+    // - qty formats: "1x", "1 x"
+    // - currency: 10,000$ | $10,000
+    // - digits: Western 0-9 and Arabic-Indic ۰-۹
+    // - stray punctuation in username; stop username at first qty token
     const results = new Map();
+    let scannedCount = 0;
+    let matchedCount = 0;
 
-    const regex =
-      /^(?<user>[^\n]+?)\s+(?<qty>\d+)x\s+.+?\bGheymat\s+(?<price>[\d,]+)\$\s+Kharid\b/i;
+    const arabicDigits = /[\u06F0-\u06F9]/; // ۰-۹
+    const toEnglishDigits = (str) =>
+      str.replace(/[\u06F0-\u06F9]/g, (d) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d)));
+
+    const patterns = [
+      // user qty x ... Gheymat price$ ... Kharid (latin)
+      /^(?<user>[^\n]+?)\s+(?<qty>[\d\u06F0-\u06F9]+)\s*x\s+.+?\bGheymat\b\s+\$?(?<price>[\d\u06F0-\u06F9,]+)\$?\s+\bKharid\b/i,
+      // Persian markers
+      /^(?<user>[^\n]+?)\s+(?<qty>[\d\u06F0-\u06F9]+)\s*x\s+.+?\bقیمت\b\s+\$?(?<price>[\d\u06F0-\u06F9,]+)\$?\s+\bخرید\b/i,
+    ];
 
     for (const msg of messages) {
-      const text = (msg.content || "").trim();
-      const match = regex.exec(text);
+      const raw = (msg.content || "").trim();
+      if (!raw) continue;
+      scannedCount += 1;
+      let match = null;
+      for (const rx of patterns) {
+        match = rx.exec(raw);
+        if (match) break;
+      }
       if (!match) continue;
+      matchedCount += 1;
 
-      const username = match.groups.user.trim();
-      const qty = parseInt(match.groups.qty, 10) || 0;
-      const price = parseInt(match.groups.price.replace(/,/g, ""), 10) || 0;
+      let username = match.groups.user.trim();
+      // Trim trailing separators before qty
+      username = username.replace(/[\-–—:,|]+\s*$/, "").trim();
+
+      const qtyStr = toEnglishDigits(match.groups.qty);
+      const qty = parseInt(qtyStr, 10) || 0;
+
+      const priceStr = toEnglishDigits(match.groups.price).replace(/,/g, "");
+      const price = parseInt(priceStr, 10) || 0;
+
       if (!username || qty <= 0 || price <= 0) continue;
 
       const amount = qty * price;
@@ -163,7 +191,7 @@ class ReportManager {
     }));
 
     arr.sort((a, b) => b.total - a.total);
-    return arr;
+    return { summary: arr, scannedCount, matchedCount };
   }
 
   formatNumber(n) {
