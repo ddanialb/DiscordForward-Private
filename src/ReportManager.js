@@ -4,7 +4,10 @@ class ReportManager {
   constructor(client, config) {
     this.client = client;
     this.config = config;
-    this.sourceChannelId = config.sourceChannelId;
+    this.sourceChannelId =
+      process.env.SOURCE_CHANNEL_ID ||
+      config.sourceChannelId ||
+      "1185291194096431124";
     this.setupEventListeners();
   }
 
@@ -19,10 +22,16 @@ class ReportManager {
         await message.channel.send(
           `⏳ درحال جمع آوری اطلاعات بین ${this.formatDateFa(
             start
-          )} تا ${this.formatDateFa(end)} از همین کانال...`
+          )} تا ${this.formatDateFa(end)} از کانال سورس تعیین‌شده...`
         );
 
-        const channel = message.channel;
+        const channel = this.client.channels.cache.get(this.sourceChannelId);
+        if (!channel) {
+          await message.channel.send(
+            `❌ کانال سورس با آیدی ${this.sourceChannelId} پیدا نشد.`
+          );
+          return;
+        }
 
         const messages = await this.fetchMessagesBetween(channel, start, end);
         const { summary, scannedCount, matchedCount } =
@@ -43,7 +52,9 @@ class ReportManager {
 
         const header = `🔎 اسکن: ${scannedCount} پیام | تطبیق: ${matchedCount} خرید\n\n📊 مجموع هزینه ها از ${this.formatDateFa(
           start
-        )} تا ${this.formatDateFa(end)} (کانال: ${channel.name || channel.id})`;
+        )} تا ${this.formatDateFa(end)} (کانال سورس: ${
+          channel.name || channel.id
+        })`;
         const footer = `
 —
 جمع کل: $${this.formatNumber(totalAll)}`;
@@ -213,7 +224,8 @@ class ReportManager {
         if (!username || qty <= 0 || price <= 0) continue;
 
         const key = normalizeUsername(username);
-        const amount = qty * price;
+        // Price in log is already the total for that line (qty accounted)
+        const amount = price;
         totalsByUserKey.set(key, (totalsByUserKey.get(key) || 0) + amount);
         if (!displayNameByUserKey.has(key)) {
           displayNameByUserKey.set(key, username);
